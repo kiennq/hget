@@ -134,25 +134,30 @@ func (d *HttpDownloader) Do(doneChan chan bool, fileChan chan string, errorChan 
 	var barpool *pb.Pool
 	var err error
 
-	if DisplayProgressBar() {
-		bars = make([]*pb.ProgressBar, 0)
-		for i, part := range d.parts {
-			newbar := pb.New64(part.RangeTo - part.RangeFrom).SetUnits(pb.U_BYTES).Prefix(color.YellowString(fmt.Sprintf("%s-%d", d.file, i)))
-			bars = append(bars, newbar)
-		}
-		barpool, err = pb.StartPool(bars...)
-		FatalCheck(err)
-	}
-
 	for i, p := range d.parts {
-		ws.Add(1)
-		go func(d *HttpDownloader, loop int64, part Part) {
-			defer ws.Done()
-			var bar *pb.ProgressBar
 
-			if DisplayProgressBar() {
-				bar = bars[loop]
+		if p.RangeTo <= p.RangeFrom {
+			fileChan <- p.Path
+			stateSaveChan <- Part{
+				Url:       d.url,
+				Path:      p.Path,
+				RangeFrom: p.RangeFrom,
+				RangeTo:   p.RangeTo,
 			}
+
+			continue
+		}
+
+		var bar *pb.ProgressBar
+
+		if DisplayProgressBar() {
+			bar = pb.New64(p.RangeTo - p.RangeFrom).SetUnits(pb.U_BYTES).Prefix(color.YellowString(fmt.Sprintf("%s-%d", d.file, i)))
+			bars = append(bars, bar)
+		}
+
+		ws.Add(1)
+		go func(d *HttpDownloader, bar *pb.ProgressBar, part Part) {
+			defer ws.Done()
 
 			var ranges string
 			if part.RangeTo != d.len {
@@ -214,19 +219,25 @@ func (d *HttpDownloader) Do(doneChan chan bool, fileChan chan string, errorChan 
 				// interrupt download by forcefully close the input stream
 				resp.Body.Close()
 				<-finishDownloadChan
-				stateSaveChan <- Part{
-					Url:       d.url,
-					Path:      part.Path,
-					RangeFrom: current + part.RangeFrom,
-					RangeTo:   part.RangeTo,
-				}
 			case <-finishDownloadChan:
 			}
 
-			bar.Update()
-			bar.Finish()
-		}(d, int64(i), p)
+			stateSaveChan <- Part{
+				Url:       d.url,
+				Path:      part.Path,
+				RangeFrom: current + part.RangeFrom,
+				RangeTo:   part.RangeTo,
+			}
+
+			if DisplayProgressBar() {
+				bar.Update()
+				bar.Finish()
+			}
+		}(d, bar, p)
 	}
+
+	barpool, err = pb.StartPool(bars...)
+	FatalCheck(err)
 
 	ws.Wait()
 	doneChan <- true
