@@ -123,8 +123,9 @@ func partCalculate(par int64, len int64, url string) []Part {
 		// Padding 0 before path name as filename will be sorted as string
 		fname := fmt.Sprintf("%s.part%06d", file, j)
 		path := filepath.Join(folder, fname) // ~/.hget/download-file-name/part-name
-		ret[j] = Part{Url: url, Path: path, RangeFrom: from, RangeTo: to}
+		ret[j] = Part{Index: j, Url: url, Path: path, RangeFrom: from, RangeTo: to}
 	}
+
 	return ret
 }
 
@@ -134,11 +135,12 @@ func (d *HttpDownloader) Do(doneChan chan bool, fileChan chan string, errorChan 
 	var barpool *pb.Pool
 	var err error
 
-	for i, p := range d.parts {
+	for _, p := range d.parts {
 
 		if p.RangeTo <= p.RangeFrom {
 			fileChan <- p.Path
 			stateSaveChan <- Part{
+				Index:     p.Index,
 				Url:       d.url,
 				Path:      p.Path,
 				RangeFrom: p.RangeFrom,
@@ -151,7 +153,7 @@ func (d *HttpDownloader) Do(doneChan chan bool, fileChan chan string, errorChan 
 		var bar *pb.ProgressBar
 
 		if DisplayProgressBar() {
-			bar = pb.New64(p.RangeTo - p.RangeFrom).SetUnits(pb.U_BYTES).Prefix(color.YellowString(fmt.Sprintf("%s-%d", d.file, i)))
+			bar = pb.New64(p.RangeTo - p.RangeFrom).SetUnits(pb.U_BYTES).Prefix(color.YellowString(fmt.Sprintf("%s-%d", d.file, p.Index)))
 			bars = append(bars, bar)
 		}
 
@@ -223,6 +225,7 @@ func (d *HttpDownloader) Do(doneChan chan bool, fileChan chan string, errorChan 
 			}
 
 			stateSaveChan <- Part{
+				Index:     part.Index,
 				Url:       d.url,
 				Path:      part.Path,
 				RangeFrom: current + part.RangeFrom,
